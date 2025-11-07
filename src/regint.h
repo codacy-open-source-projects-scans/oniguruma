@@ -4,7 +4,7 @@
   regint.h -  Oniguruma (regular expression library)
 **********************************************************************/
 /*-
- * Copyright (c) 2002-2024  K.Kosako
+ * Copyright (c) 2002-2025  K.Kosako
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -81,6 +81,7 @@
 #define USE_NEWLINE_AT_END_OF_STRING_HAS_EMPTY_LINE     /* /\n$/ =~ "\n" */
 #define USE_WARNING_REDUNDANT_NESTED_REPEAT_OPERATOR
 #define USE_RETRY_LIMIT
+/* #define USE_TIME_LIMIT */
 #ifdef USE_GOTO_LABELS_AS_VALUES
 #define USE_THREADED_CODE
 #define USE_DIRECT_THREADED_CODE
@@ -109,11 +110,18 @@
 #define DEFAULT_MATCH_STACK_LIMIT_SIZE         0 /* unlimited */
 #define DEFAULT_RETRY_LIMIT_IN_MATCH    10000000
 #define DEFAULT_RETRY_LIMIT_IN_SEARCH          0 /* unlimited */
+#define DEFAULT_TIME_LIMIT_MSEC                0 /* unlimited (msec.) */
 #define DEFAULT_SUBEXP_CALL_LIMIT_IN_SEARCH    0 /* unlimited */
 #define DEFAULT_SUBEXP_CALL_MAX_NEST_LEVEL    20
 
 
 #include "regenc.h"
+
+#if !defined(_WIN32) || defined(__GNUC__)
+#if !defined(HAVE_TIME_H) || !defined(HAVE_CLOCK_GETTIME)
+#undef USE_TIME_LIMIT
+#endif
+#endif
 
 #ifndef ONIG_NO_STANDARD_C_HEADERS
 
@@ -301,10 +309,14 @@ typedef unsigned __int64 uint64_t;
 #endif
 #endif /* _WIN32 */
 
-#if SIZEOF_VOIDP == SIZEOF_LONG
+#if SIZEOF_VOIDP == SIZEOF_INTPTR_T
+typedef intptr_t hash_data_type;
+#elif SIZEOF_VOIDP == SIZEOF_LONG
 typedef unsigned long hash_data_type;
 #elif SIZEOF_VOIDP == SIZEOF_LONG_LONG
 typedef unsigned long long hash_data_type;
+#else
+#error SIZEOF_VOIDP has unexpected value
 #endif
 
 /* strend hash */

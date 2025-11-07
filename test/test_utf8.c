@@ -1,6 +1,6 @@
 /*
  * test_utf8.c
- * Copyright (c) 2019-2024  K.Kosako
+ * Copyright (c) 2019-2025  K.Kosako
  */
 #ifdef ONIG_ESCAPE_UCHAR_COLLISION
 #undef ONIG_ESCAPE_UCHAR_COLLISION
@@ -1181,6 +1181,24 @@ extern int main(int argc, char* argv[])
   x2("\\p{^Emoji}", "\xEF\xBC\x93", 0, 3);
   x2("\\p{Extended_Pictographic}", "\xE2\x9A\xA1", 0, 3);
   n("\\p{Extended_Pictographic}", "\xE3\x81\x82");
+  x2("\\pC", "\xC2\xAD", 0, 2); // U+00AD: Soft Hyphen
+  x2("\\pL", "U", 0, 1);
+  x2("\\pM", "\xE2\x83\x9D", 0, 3); // U+20DD: Combining Enclosing Circle
+  x2("\\pN+", "3Ⅴ", 0, 4);
+  x2("\\pP+", "†⁂", 0, 6);
+  x2("\\pS+", "€₤", 0, 6);
+  x2("\\pZ+", " ", 0, 1);
+  n("\\pL", "@");
+  x2("\\pL+", "akZtE", 0, 5);
+  x2("\\PL+", "1@=-%", 0, 5);
+  e("\\p", "", ONIGERR_INVALID_CHAR_PROPERTY_NAME);
+  e("\\p(", "", ONIGERR_INVALID_CHAR_PROPERTY_NAME);
+  e("\\pQ", "", ONIGERR_INVALID_CHAR_PROPERTY_NAME);
+  x2("[\\pL]", "s", 0, 1);
+  n("[^\\pL]", "s");
+  x2("[\\PL]+", "-3@", 0, 3);
+  e("[\\p]", "", ONIGERR_INVALID_CHAR_PROPERTY_NAME);
+  e("[\\pU]", "", ONIGERR_INVALID_CHAR_PROPERTY_NAME);
 
   x2("\\p{Word}", "こ", 0, 3);
   n("\\p{^Word}", "こ");
@@ -1343,6 +1361,13 @@ extern int main(int argc, char* argv[])
   x2("\\x{4E38}", "\xE4\xB8\xB8", 0, 3);
   x2("\\u4E38", "\xE4\xB8\xB8", 0, 3);
   x2("\\u0040", "@", 0, 1);
+
+  e("\\xF4", "", ONIGERR_TOO_SHORT_MULTI_BYTE_STRING);
+  e("\\xF5", "", ONIGERR_INVALID_CODE_POINT_VALUE);
+  e("\\xFF", "", ONIGERR_INVALID_CODE_POINT_VALUE);
+  e("[\\xF4]", "", ONIGERR_TOO_SHORT_MULTI_BYTE_STRING);
+  e("[\\xF5]", "", ONIGERR_INVALID_CODE_POINT_VALUE);
+  e("[\\x00-\\xFF]", "", ONIGERR_INVALID_CODE_POINT_VALUE);
 
   x2("c.*\\b", "abc", 2, 3);
   x2("\\b.*abc.*\\b", "abc", 0, 3);
@@ -1730,13 +1755,13 @@ extern int main(int argc, char* argv[])
 
 
   n("a(b|)+d", "abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbcd"); /* https://www.haijin-boys.com/discussions/5079 */
-  n("   \xfd", ""); /* https://bugs.php.net/bug.php?id=77370 */
+  e("   \xfd", "", ONIGERR_INVALID_CODE_POINT_VALUE); /* https://bugs.php.net/bug.php?id=77370 */
   /* can't use \xfc00.. because compiler error: hex escape sequence out of range */
-  n("()0\\xfc00000\\xfc00000\\xfc00000\xfc", ""); /* https://bugs.php.net/bug.php?id=77371 */
-  x2("000||0\xfa", "0", 0, 0); /* https://bugs.php.net/bug.php?id=77381 */
+  e("()0\\xfc00000\\xfc00000\\xfc00000\xfc", "", ONIGERR_INVALID_CODE_POINT_VALUE); /* https://bugs.php.net/bug.php?id=77371 */
+  e("000||0\xfa", "0", ONIGERR_INVALID_CODE_POINT_VALUE); /* https://bugs.php.net/bug.php?id=77381 */
   e("(?i)000000000000000000000\xf0", "", ONIGERR_INVALID_CODE_POINT_VALUE); /* https://bugs.php.net/bug.php?id=77382 */
-  n("0000\\\xf5", "0"); /* https://bugs.php.net/bug.php?id=77385 */
-  n("(?i)FFF00000000000000000\xfd", ""); /* https://bugs.php.net/bug.php?id=77394 */
+  e("0000\\\xf5", "0", ONIGERR_INVALID_CODE_POINT_VALUE); /* https://bugs.php.net/bug.php?id=77385 */
+  e("(?i)FFF00000000000000000\xfd", "", ONIGERR_INVALID_CODE_POINT_VALUE); /* https://bugs.php.net/bug.php?id=77394 */
   n("(?x)\n  (?<!\\+\\+|--)(?<=[({\\[,?=>:*]|&&|\\|\\||\\?|\\*\\/|^await|[^\\._$[:alnum:]]await|^return|[^\\._$[:alnum:]]return|^default|[^\\._$[:alnum:]]default|^yield|[^\\._$[:alnum:]]yield|^)\\s*\n  (?!<\\s*[_$[:alpha:]][_$[:alnum:]]*((\\s+extends\\s+[^=>])|,)) # look ahead is not type parameter of arrow\n  (?=(<)\\s*(?:([_$[:alpha:]][-_$[:alnum:].]*)(?<!\\.|-)(:))?((?:[a-z][a-z0-9]*|([_$[:alpha:]][-_$[:alnum:].]*))(?<!\\.|-))(?=((<\\s*)|(\\s+))(?!\\?)|\\/?>))", "    while (i < len && f(array[i]))"); /* Issue #192 */
 
   x2("aaaaaaaaaaaaaaaaaaaaaaaあb", "aaaaaaaaaaaaaaaaaaaaaaaあb", 0, 27); /* Issue #221 */
@@ -1753,6 +1778,7 @@ extern int main(int argc, char* argv[])
   e("\\x{7fffffff}", "", ONIGERR_INVALID_CODE_POINT_VALUE);
   e("[\\x{7fffffff}]", "", ONIGERR_INVALID_CODE_POINT_VALUE);
   e("\\u040", "@", ONIGERR_INVALID_CODE_POINT_VALUE);
+  e("\\u", "", ONIGERR_INVALID_CODE_POINT_VALUE);
   e("(?<abc>\\g<abc>)", "zzzz", ONIGERR_NEVER_ENDING_RECURSION);
   e("(*FOO)", "abcdefg", ONIGERR_UNDEFINED_CALLOUT_NAME);
   e("*", "abc", ONIGERR_TARGET_OF_REPEAT_OPERATOR_NOT_SPECIFIED);

@@ -2,7 +2,7 @@
   regparse.c -  Oniguruma (regular expression library)
 **********************************************************************/
 /*-
- * Copyright (c) 2002-2024  K.Kosako
+ * Copyright (c) 2002-2025  K.Kosako
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -105,6 +105,7 @@ OnigSyntaxType OnigSyntaxOniguruma = {
 #ifdef USE_WHOLE_OPTIONS
       ONIG_SYN_WHOLE_OPTIONS |
 #endif
+      ONIG_SYN_ESC_P_WITH_ONE_CHAR_PROP |
       ONIG_SYN_WARN_REDUNDANT_NESTED_REPEAT
     )
   , ONIG_OPTION_NONE
@@ -326,6 +327,18 @@ onig_set_parse_depth_limit(unsigned int depth)
 
 #define DEC_PARSE_DEPTH(d)  (d)--
 
+static OnigCodePoint enc_sb_out(OnigEncoding enc)
+{
+  if (ONIGENC_IS_UNICODE_ENCODING(enc)) {
+    if (ONIGENC_MBC_MINLEN(enc) == 1)
+      return ASCII_LIMIT + 1;
+    else
+      return 0;
+  }
+  else {
+      return 0x100;
+  }
+}
 
 static int
 bbuf_init(BBuf* buf, int size)
@@ -4608,6 +4621,7 @@ typedef struct {
     struct {
       int ctype;
       int not;
+      int braces;
     } prop;
   } u;
 } PToken;
@@ -5370,23 +5384,27 @@ fetch_token_cc(PToken* tok, UChar** src, UChar* end, ParseEnv* env, int state)
 
     case 'p':
     case 'P':
-      if (PEND) break;
+      if (! PEND && PPEEK_IS('{')) {
+        if (IS_SYNTAX_OP2(syn, ONIG_SYN_OP2_ESC_P_BRACE_CHAR_PROPERTY)) {
+          PINC;
+          tok->type = TK_CHAR_PROPERTY;
+          tok->u.prop.not = c == 'P';
+          tok->u.prop.braces = 1;
 
-      c2 = PPEEK;
-      if (c2 == '{' &&
-          IS_SYNTAX_OP2(syn, ONIG_SYN_OP2_ESC_P_BRACE_CHAR_PROPERTY)) {
-        PINC;
+          if (!PEND && IS_SYNTAX_OP2(syn, ONIG_SYN_OP2_ESC_P_BRACE_CIRCUMFLEX_NOT)) {
+            PFETCH(c2);
+            if (c2 == '^') {
+              tok->u.prop.not = tok->u.prop.not == 0;
+            }
+            else
+              PUNFETCH;
+          }
+        }
+      }
+      else if (IS_SYNTAX_BV(syn, ONIG_SYN_ESC_P_WITH_ONE_CHAR_PROP)) {
         tok->type = TK_CHAR_PROPERTY;
         tok->u.prop.not = c == 'P';
-
-        if (!PEND && IS_SYNTAX_OP2(syn, ONIG_SYN_OP2_ESC_P_BRACE_CIRCUMFLEX_NOT)) {
-          PFETCH(c2);
-          if (c2 == '^') {
-            tok->u.prop.not = tok->u.prop.not == 0;
-          }
-          else
-            PUNFETCH;
-        }
+        tok->u.prop.braces = 0;
       }
       break;
 
@@ -5410,10 +5428,8 @@ fetch_token_cc(PToken* tok, UChar** src, UChar* end, ParseEnv* env, int state)
       break;
 
     case 'x':
-      if (PEND) break;
-
       prev = p;
-      if (PPEEK_IS('{') && IS_SYNTAX_OP(syn, ONIG_SYN_OP_ESC_X_BRACE_HEX8)) {
+      if (! PEND && PPEEK_IS('{') && IS_SYNTAX_OP(syn, ONIG_SYN_OP_ESC_X_BRACE_HEX8)) {
         PINC;
         r = scan_hexadecimal_number(&p, end, 0, 8, enc, &code);
         if (r < 0) return r;
@@ -5461,16 +5477,13 @@ fetch_token_cc(PToken* tok, UChar** src, UChar* end, ParseEnv* env, int state)
       break;
 
     case 'u':
-      if (PEND) break;
       prev = p;
       if (IS_SYNTAX_OP2(syn, ONIG_SYN_OP2_ESC_U_HEX4)) {
         mindigits = maxdigits = 4;
       u_hex_digits:
         r = scan_hexadecimal_number(&p, end, mindigits, maxdigits, enc, &code);
         if (r < 0) return r;
-        if (p == prev) {  /* can't read nothing. */
-          code = 0; /* but, it's not error */
-        }
+
         tok->type = TK_CODE_POINT;
         tok->base_num = 16;
         tok->u.code   = code;
@@ -5858,10 +5871,8 @@ fetch_token(PToken* tok, UChar** src, UChar* end, ParseEnv* env)
       break;
 
     case 'x':
-      if (PEND) break;
-
       prev = p;
-      if (PPEEK_IS('{') && IS_SYNTAX_OP(syn, ONIG_SYN_OP_ESC_X_BRACE_HEX8)) {
+      if (! PEND && PPEEK_IS('{') && IS_SYNTAX_OP(syn, ONIG_SYN_OP_ESC_X_BRACE_HEX8)) {
         PINC;
         r = scan_hexadecimal_number(&p, end, 0, 8, enc, &code);
         if (r < 0) return r;
@@ -5904,16 +5915,13 @@ fetch_token(PToken* tok, UChar** src, UChar* end, ParseEnv* env)
       break;
 
     case 'u':
-      if (PEND) break;
       prev = p;
       mindigits = maxdigits = 4;
       if (IS_SYNTAX_OP2(syn, ONIG_SYN_OP2_ESC_U_HEX4)) {
     u_hex_digits:
         r = scan_hexadecimal_number(&p, end, mindigits, maxdigits, enc, &code);
         if (r < 0) return r;
-        if (p == prev) {  /* can't read nothing. */
-          code = 0; /* but, it's not error */
-        }
+
         tok->type = TK_CODE_POINT;
         tok->base_num = 16;
         tok->u.code   = code;
@@ -6111,21 +6119,28 @@ fetch_token(PToken* tok, UChar** src, UChar* end, ParseEnv* env)
 
     case 'p':
     case 'P':
-      if (!PEND && PPEEK_IS('{') &&
-          IS_SYNTAX_OP2(syn, ONIG_SYN_OP2_ESC_P_BRACE_CHAR_PROPERTY)) {
-        PINC;
+      if (! PEND && PPEEK_IS('{')) {
+        if (IS_SYNTAX_OP2(syn, ONIG_SYN_OP2_ESC_P_BRACE_CHAR_PROPERTY)) {
+          PINC;
+          tok->type = TK_CHAR_PROPERTY;
+          tok->u.prop.not = c == 'P';
+          tok->u.prop.braces = 1;
+
+          if (! PEND &&
+              IS_SYNTAX_OP2(syn, ONIG_SYN_OP2_ESC_P_BRACE_CIRCUMFLEX_NOT)) {
+            PFETCH(c);
+            if (c == '^') {
+              tok->u.prop.not = tok->u.prop.not == 0;
+            }
+            else
+              PUNFETCH;
+          }
+        }
+      }
+      else if (IS_SYNTAX_BV(syn, ONIG_SYN_ESC_P_WITH_ONE_CHAR_PROP)) {
         tok->type = TK_CHAR_PROPERTY;
         tok->u.prop.not = c == 'P';
-
-        if (!PEND &&
-            IS_SYNTAX_OP2(syn, ONIG_SYN_OP2_ESC_P_BRACE_CIRCUMFLEX_NOT)) {
-          PFETCH(c);
-          if (c == '^') {
-            tok->u.prop.not = tok->u.prop.not == 0;
-          }
-          else
-            PUNFETCH;
-        }
+        tok->u.prop.braces = 0;
       }
       break;
 
@@ -6751,7 +6766,7 @@ prs_posix_bracket(CClassNode* cc, UChar** src, UChar* end, ParseEnv* env)
 }
 
 static int
-fetch_char_property_to_ctype(UChar** src, UChar* end, ParseEnv* env)
+fetch_char_property_to_ctype(UChar** src, UChar* end, int braces, ParseEnv* env)
 {
   int r;
   OnigCodePoint c;
@@ -6760,10 +6775,25 @@ fetch_char_property_to_ctype(UChar** src, UChar* end, ParseEnv* env)
 
   p = *src;
   enc = env->enc;
-  r = ONIGERR_END_PATTERN_WITH_UNMATCHED_PARENTHESIS;
-  start = prev = p;
+  start = p;
 
-  while (!PEND) {
+  if (braces == 0) {
+    if (PEND) return ONIGERR_INVALID_CHAR_PROPERTY_NAME;
+
+    PFETCH_S(c);
+    r = ONIGENC_PROPERTY_NAME_TO_CTYPE(enc, start, p);
+    if (r >= 0) {
+      *src = p;
+    }
+    else {
+      onig_scan_env_set_error_string(env, r, *src, p);
+    }
+
+    return r;
+  }
+
+  r = ONIGERR_END_PATTERN_WITH_UNMATCHED_PARENTHESIS;
+  while (! PEND) {
     prev = p;
     PFETCH_S(c);
     if (c == '}') {
@@ -6792,7 +6822,7 @@ prs_char_property(Node** np, PToken* tok, UChar** src, UChar* end,
   int r, ctype;
   CClassNode* cc;
 
-  ctype = fetch_char_property_to_ctype(src, end, env);
+  ctype = fetch_char_property_to_ctype(src, end, tok->u.prop.braces, env);
   if (ctype < 0) return ctype;
 
   if (ctype == ONIGENC_CTYPE_WORD) {
@@ -6882,9 +6912,17 @@ cc_char_next(CClassNode* cc, OnigCodePoint *from, OnigCodePoint to,
         else
           return ONIGERR_EMPTY_RANGE_IN_CHAR_CLASS;
       }
-      bitset_set_range(cc->bs, (int )*from, (int )(to < 0xff ? to : 0xff));
-      r = add_code_range(&(cc->mbuf), env, (OnigCodePoint )*from, to);
-      if (r < 0) return r;
+
+      OnigCodePoint sbout = enc_sb_out(env->enc);
+
+      if (*from < sbout)
+        bitset_set_range(cc->bs, (int )*from, (int )(to < sbout ? to : sbout - 1));
+
+      if (to >= sbout) {
+        r = add_code_range(&(cc->mbuf), env,
+                 (OnigCodePoint )(*from > sbout ? *from : sbout), to);
+        if (r < 0) return r;
+      }
     }
   ccs_range_end:
     *state = CS_COMPLETE;
@@ -7032,16 +7070,16 @@ prs_cc(Node** np, PToken* tok, UChar** src, UChar* end, ParseEnv* env)
           fetched = 0;
         }
 
-        if (i == 1) {
+        if (! ONIGENC_IS_VALID_MBC_STRING(env->enc, buf, buf + len)) {
+          r = ONIGERR_INVALID_WIDE_CHAR_VALUE;
+          goto err;
+        }
+
+        if (len == 1) {
           in_code = (OnigCodePoint )buf[0];
           goto crude_single;
         }
         else {
-          if (! ONIGENC_IS_VALID_MBC_STRING(env->enc, buf, buf + len)) {
-            r = ONIGERR_INVALID_WIDE_CHAR_VALUE;
-            goto err;
-          }
-
           in_code = ONIGENC_MBC_TO_CODE(env->enc, buf, bufe);
           in_type = CV_MB;
         }
@@ -7100,7 +7138,7 @@ prs_cc(Node** np, PToken* tok, UChar** src, UChar* end, ParseEnv* env)
 
     case TK_CHAR_PROPERTY:
       {
-        int ctype = fetch_char_property_to_ctype(&p, end, env);
+        int ctype = fetch_char_property_to_ctype(&p, end, tok->u.prop.braces, env);
         if (ctype < 0) {
           r = ctype;
           goto err;
